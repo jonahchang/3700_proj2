@@ -14,7 +14,7 @@ PASSWORD = '1b10da1e033405616a318b5edcb4ca077919f67f35fd99f48fcf34e2aa5e96d2'
 def parse_arguments():
     parser = argparse.ArgumentParser(description='3700ftp: A simple FTP client.')
     parser.add_argument('operation', help='Operation to perform', choices=['ls', 'mkdir', 'rm', 'rmdir', 'cp', 'mv'])
-    parser.add_argument('param1', help='First parameter: local path or FTP URL', nargs='?')
+    parser.add_argument('param1', help='First parameter: local path or FTP URL')
     parser.add_argument('param2', help='Second parameter: local path or FTP URL', nargs='?')
     return parser.parse_args()
 
@@ -122,7 +122,7 @@ def delete_directory(control_socket, path):
 def copy_file(control_socket, source, destination):
     # Determine if we are uploading or downloading based on the source format
     if os.path.isfile(source):  # Uploading a local file to FTP
-        destination_host, destination_path = parse_ftp_url(destination)
+        destination_host, _, destination_path = parse_ftp_url(destination)
         with open(source, 'rb') as file:
             data_socket = establish_data_channel(control_socket)
             control_socket.sendall(f'STOR {destination_path}\r\n'.encode('utf-8'))
@@ -131,7 +131,7 @@ def copy_file(control_socket, source, destination):
             data_socket.close()
             print(control_socket.recv(1024).decode('utf-8'))  # Final response
     else:  # Downloading a file from FTP to local
-        source_host, source_path = parse_ftp_url(source)
+        source_host, _, source_path = parse_ftp_url(source)
         data_socket = establish_data_channel(control_socket)
         control_socket.sendall(f'RETR {source_path}\r\n'.encode('utf-8'))
         print(control_socket.recv(1024).decode('utf-8'))  # Response to RETR command
@@ -149,7 +149,7 @@ def move_file(control_socket, source, destination):
     copy_file(control_socket, source, destination)
     # Determine if the source is an FTP URL to delete the remote file
     if source.startswith('ftp://'):
-        source_host, source_path = parse_ftp_url(source)
+        source_host, _, source_path = parse_ftp_url(source)
         control_socket.sendall(f'DELE {source_path}\r\n'.encode('utf-8'))
         print(control_socket.recv(1024).decode('utf-8'))  # Response to DELE command
     else:  # Delete the local source file
