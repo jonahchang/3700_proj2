@@ -37,8 +37,12 @@ class FTPClient:
             return
 
         self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.control_socket.connect((self.server_url.hostname, self.server_url.port or 21))
-        self.receive_response()
+        try:
+            self.control_socket.connect((self.server_url.hostname, self.server_url.port or 21))
+            self.receive_response()
+        except Exception as e:
+            print("Error connecting to server")
+
 
     def login(self):
         if not self.username:
