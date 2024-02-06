@@ -2,6 +2,7 @@
 import socket
 import argparse
 from urllib.parse import urlparse
+import os
 
 
 def parse_pasv_response(response):
@@ -96,8 +97,11 @@ class FTPClient:
     def cp(self, source, destination):
         # If source is a local file and destination is an FTP URL
         if not urlparse(source).scheme and urlparse(destination).scheme == 'ftp':
+            dest_path = urlparse(destination).path
+            if dest_path.endswith('/'):
+                # Append the source file name to the destination path
+                dest_path += os.path.basename(source)
             self.copy_local_to_remote(source, destination)
-        # If source is an FTP URL and destination is a local file
         elif urlparse(source).scheme == 'ftp' and not urlparse(destination).scheme:
             self.copy_remote_to_local(source, destination)
         else:
