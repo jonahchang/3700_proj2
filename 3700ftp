@@ -50,6 +50,7 @@ def set_transfer_settings(control_socket):
 
 def connect_and_login(host, port=21):
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    control_socket.settimeout(10)
     control_socket.connect((host, port))
     print(control_socket.recv(1024).decode('utf-8'))  # Welcome message
 
@@ -122,14 +123,19 @@ def delete_directory(control_socket, path):
 def copy_file(control_socket, source, destination):
     # Determine if we are uploading or downloading based on the source format
     if os.path.isfile(source):  # Uploading a local file to FTP
-        destination_host, _, destination_path = parse_ftp_url(destination)
-        with open(source, 'rb') as file:
-            data_socket = establish_data_channel(control_socket)
-            control_socket.sendall(f'STOR {destination_path}\r\n'.encode('utf-8'))
-            print(control_socket.recv(1024).decode('utf-8'))  # Response to STOR command
-            data_socket.sendall(file.read())
-            data_socket.close()
+        try:
+            destination_host, _, destination_path = parse_ftp_url(destination)
+            with open(source, 'rb') as file:
+                data_socket = establish_data_channel(control_socket)
+                control_socket.sendall(f'STOR {destination_path}\r\n'.encode('utf-8'))
+                print(control_socket.recv(1024).decode('utf-8'))  # Response to STOR command
+                data_socket.sendall(file.read())
+        except socket.timeout:
+            print("File transfer timed out")
+        finally:
+            if data_socket: data_socket.close()
             print(control_socket.recv(1024).decode('utf-8'))  # Final response
+
     else:  # Downloading a file from FTP to local
         source_host, _, source_path = parse_ftp_url(source)
         data_socket = establish_data_channel(control_socket)
@@ -191,6 +197,7 @@ def main():
     host, port, _ = parse_ftp_url(args.param1)
 
     control_socket = connect_and_login(host, port)
+    set_transfer_settings(control_socket)
     perform_operation(args, control_socket)
 
     control_socket.sendall(b'QUIT\r\n')
