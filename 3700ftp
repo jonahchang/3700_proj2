@@ -1,163 +1,242 @@
 #!/usr/bin/env python3
-import argparse
 import socket
+import argparse
 from urllib.parse import urlparse
 
 
+def parse_pasv_response(response):
+    parts = response.split()
+    code = int(parts[0])
+
+    if code // 100 == 2:
+        try:
+            # Find the opening parenthesis in the response
+            opening_paren_index = response.index('(')
+            # Extract the comma-separated values inside the parentheses
+            host_port_str = response[opening_paren_index + 1: response.index(')', opening_paren_index)]
+            host, port_str = host_port_str.split(',')[:4], host_port_str.split(',')[4:]
+            host = '.'.join(host)
+            port = int(port_str[0]) * 256 + int(port_str[1])
+            return host, port
+        except (ValueError, IndexError):
+            print("Failed to parse PASV response")
+    return None, None
+
+
 class FTPClient:
-    def __init__(self, server_url):
+    def __init__(self, server_url, username=None, password=None):
         self.server_url = urlparse(server_url)
+        self.username = username
+        self.password = password
         self.control_socket = None
         self.data_socket = None
-        self.verbose = False
-
-    def parse_args(self):
-        parser = argparse.ArgumentParser(description='FTP client for basic operations')
-        parser.add_argument('operation', choices=['ls', 'mkdir', 'rm', 'rmdir', 'cp', 'mv'],
-                            help='Operation to execute')
-        parser.add_argument('param1', help='First parameter (local or FTP path)')
-        parser.add_argument('param2', nargs='?', default='', help='Second parameter (local or FTP path)')
-        parser.add_argument('--verbose', '-v', action='store_true',
-                            help='Print all messages to and from the FTP server')
-        return parser.parse_args()
-
-    def send_command(self, command):
-        if self.verbose:
-            print(f'Sending: {command.strip()}')
-        self.control_socket.sendall(command.encode('utf-8'))
-
-    def receive_response(self):
-        response = self.control_socket.recv(4096).decode('utf-8')
-        if self.verbose:
-            print(f'Received: {response.strip()}')
-        return response
 
     def connect(self):
         self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.control_socket.connect((self.server_url.hostname, self.server_url.port or 21))
         self.receive_response()
+        self.login()
 
     def login(self):
-        user_cmd = f"USER {self.server_url.username or 'anonymous'}\r\n"
-        self.send_command(user_cmd)
+        if not self.username:
+            raise ValueError("Please specify a username for login")
+
+        self.send_command(f"USER {self.username}")
         self.receive_response()
 
-        # If a password is provided, send the PASS command
-        if self.server_url.password:
-            pass_cmd = f"PASS {self.server_url.password}\r\n"
-            self.send_command(pass_cmd)
+        if self.password:
+            self.send_command(f"PASS {self.password}")
             self.receive_response()
 
-    def quit(self):
-        quit_cmd = "QUIT\r\n"
-        self.send_command(quit_cmd)
-        self.receive_response()
+    def send_command(self, command):
+        self.control_socket.send((command + '\r\n').encode())
 
-    def list_directory(self, path):
-        pasv_cmd = "PASV\r\n"
-        self.send_command(pasv_cmd)
+    def receive_response(self):
+        data = self.control_socket.recv(4096).decode()
+        print(data)
+        return data
+
+    def pasv(self):
+        self.send_command("PASV")
         response = self.receive_response()
+        return parse_pasv_response(response)
 
-        if response.startswith("227"):
-            data_address = self.extract_data_address(response)
-            self.open_data_socket(data_address)
+    def ls(self, path):
+        host, port = self.pasv()
+        if host and port:
+            self.send_command(f"LIST {path}")
 
-            list_cmd = f"LIST {path}\r\n"
-            self.send_command(list_cmd)
+            data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            data_socket.connect((host, port))
+
+            data = b""
+            while True:
+                chunk = data_socket.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+            print(data.decode())
+
+            data_socket.close()
             self.receive_response()
 
-            data = self.data_socket.recv(4096).decode('utf-8')
-            while data:
-                print(data, end='')
-                data = self.data_socket.recv(4096).decode('utf-8')
-
-            self.data_socket.close()
-            self.receive_response()
-
-    def make_directory(self, path):
-        mkdir_cmd = f"MKD {path}\r\n"
-        self.send_command(mkdir_cmd)
+    def mkdir(self, path):
+        self.send_command(f"MKD {path}")
         self.receive_response()
 
-    def remove_directory(self, path):
-        rmdir_cmd = f"RMD {path}\r\n"
-        self.send_command(rmdir_cmd)
+    def rm(self, path):
+        self.send_command(f"DELE {path}")
         self.receive_response()
 
-    def remove_file(self, path):
-        dele_cmd = f"DELE {path}\r\n"
-        self.send_command(dele_cmd)
+    def rmdir(self, path):
+        self.send_command(f"RMD {path}")
         self.receive_response()
 
-    def copy_file(self, source_path, destination_path):
-        pasv_cmd = "PASV\r\n"
-        self.send_command(pasv_cmd)
+    def cp(self, source, destination):
+        # If source is a local file and destination is an FTP URL
+        if not urlparse(source).scheme and urlparse(destination).scheme == 'ftp':
+            self.copy_local_to_remote(source, destination)
+        # If source is an FTP URL and destination is a local file
+        elif urlparse(source).scheme == 'ftp' and not urlparse(destination).scheme:
+            self.copy_remote_to_local(source, destination)
+        else:
+            print("Invalid combination of source and destination")
+
+    def copy_local_to_remote(self, source, destination):
+        with open(source, 'rb') as file:
+            self.send_command(f"STOR {destination}")
+            host, port = self.pasv()
+            if host and port:
+                data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                data_socket.connect((host, port))
+                while True:
+                    chunk = file.read(4096)
+                    if not chunk:
+                        break
+                    data_socket.sendall(chunk)
+                data_socket.close()
+
+    def copy_remote_to_local(self, source, destination):
+        # Parse the FTP URL of the source
+        source_url = urlparse(source)
+
+        # Open the destination file in binary write mode
+        with open(destination, 'wb') as local_file:
+            # Connect to the FTP server
+            self.connect()
+
+            # Send USER and PASS commands to log in
+            self.send_command(f"USER {source_url.username}")
+            self.send_command(f"PASS {source_url.password}")
+
+            # Set the data transfer mode to binary
+            self.send_command("TYPE I")
+
+            # Set the connection to passive mode and get data connection details
+            host, port = self.pasv()
+
+            # Send the RETR command to initiate the data transfer
+            self.send_command(f"RETR {source_url.path}")
+
+            # Connect to the data socket and receive the file data
+            data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            data_socket.connect((host, port))
+            while True:
+                chunk = data_socket.recv(4096)
+                if not chunk:
+                    break
+                local_file.write(chunk)
+
+            # Close the data socket
+            data_socket.close()
+
+            # Receive the response after the data transfer
+            response = self.receive_response()
+            print(response)
+
+    def mv(self, source, destination):
+        # Parse the FTP URLs of the source and destination
+        source_url = urlparse(source)
+        dest_url = urlparse(destination)
+
+        # Connect to the FTP server
+        self.connect()
+
+        # Send USER and PASS commands to log in
+        self.send_command(f"USER {source_url.username}")
+        self.send_command(f"PASS {source_url.password}")
+
+        # Send TYPE I command to set the data transfer mode to binary
+        self.send_command("TYPE I")
+
+        # Set the connection to passive mode and get data connection details
+        host, port = self.pasv()
+
+        # Send the RETR command to initiate the data transfer for the source file
+        self.send_command(f"RETR {source_url.path}")
+
+        # Connect to the data socket and receive the file data
+        data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        data_socket.connect((host, port))
+        data = b""
+        while True:
+            chunk = data_socket.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+
+        # Close the data socket
+        data_socket.close()
+
+        # Send the STOR command to initiate the data transfer for the destination file
+        self.send_command(f"STOR {dest_url.path}")
+
+        # Connect to the data socket and send the file data
+        data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        data_socket.connect((host, port))
+        data_socket.sendall(data)
+
+        # Close the data socket
+        data_socket.close()
+
+        # Receive the response after the data transfer
         response = self.receive_response()
+        print(response)
 
-        if response.startswith("227"):
-            data_address = self.extract_data_address(response)
-            self.open_data_socket(data_address)
 
-            stor_cmd = f"STOR {destination_path}\r\n"
-            self.send_command(stor_cmd)
-            self.receive_response()
+def parse_args():
+    parser = argparse.ArgumentParser(description='FTP client for basic operations')
+    parser.add_argument('operation', choices=['ls', 'mkdir', 'rm', 'rmdir', 'cp', 'mv'],
+                        help='Operation to execute')
+    parser.add_argument('param1', help='First parameter (local or FTP path)')
+    parser.add_argument('param2', nargs='?', default='', help='Second parameter (local or FTP path)')
+    parser.add_argument('--username', '-u', help='Username for FTP login')
+    parser.add_argument('--password', '-p', help='Password for FTP login')
+    parser.add_argument('server_url', help='FTP server URL')
+    return parser.parse_args()
 
-            with open(source_path, 'rb') as file:
-                data = file.read(4096)
-                while data:
-                    self.data_socket.sendall(data)
-                    data = file.read(4096)
 
-            self.data_socket.close()
-            self.receive_response()
+def main():
+    args = parse_args()
+    ftp_client = FTPClient(args.server_url, "jonahc",
+                           "1b10da1e033405616a318b5edcb4ca077919f67f35fd99f48fcf34e2aa5e96d2")
+    ftp_client.connect()
+    ftp_client.login()
 
-    def move_file(self, source_path, destination_path):
-        # Move is essentially a copy followed by a delete
-        self.copy_file(source_path, destination_path)
-        self.remove_file(source_path)
-
-    def extract_data_address(self, response):
-        start = response.find('(') + 1
-        end = response.find(')')
-        data_address = response[start:end].split(',')
-        host = '.'.join(data_address[:4])
-        port = (int(data_address[4]) << 8) + int(data_address[5])
-        return host, port
-
-    def open_data_socket(self, data_address):
-        self.data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.data_socket.connect(data_address)
+    if args.operation == 'ls':
+        ftp_client.ls(args.param1)
+    elif args.operation == 'mkdir':
+        ftp_client.mkdir(args.param1)
+    elif args.operation == 'rm':
+        ftp_client.rm(args.param1)
+    elif args.operation == 'rmdir':
+        ftp_client.rmdir(args.param1)
+    elif args.operation == 'cp':
+        ftp_client.cp(args.param1, args.param2)
+    elif args.operation == 'mv':
+        ftp_client.mv(args.param1, args.param2)
 
 
 if __name__ == "__main__":
-    ftp_client = FTPClient("ftp://ftp.3700.network")
-    args = ftp_client.parse_args()
-    ftp_client.verbose = args.verbose
-
-    try:
-        ftp_client.connect()
-        ftp_client.login()
-
-        if args.operation == 'ls':
-            ftp_client.list_directory(args.param1)
-        elif args.operation == 'mkdir':
-            ftp_client.make_directory(args.param1)
-        elif args.operation == 'rmdir':
-            ftp_client.remove_directory(args.param1)
-        elif args.operation == 'rm':
-            ftp_client.remove_file(args.param1)
-        elif args.operation == 'cp':
-            ftp_client.copy_file(args.param1, args.param2)
-        elif args.operation == 'mv':
-            ftp_client.move_file(args.param1, args.param2)
-
-        ftp_client.quit()
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-    finally:
-        if ftp_client.control_socket:
-            ftp_client.control_socket.close()
-        if ftp_client.data_socket:
-            ftp_client.data_socket.close()
+    main()
