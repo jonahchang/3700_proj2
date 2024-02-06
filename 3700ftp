@@ -28,9 +28,8 @@ class FTPClient:
         self.server_url = urlparse(server_url)
         self.username = username
         self.password = password
-        self.control_socket = None
-        self.data_socket = None
-
+        self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     def connect(self):
         if not self.server_url.hostname:
             print("Invalid server URL")
