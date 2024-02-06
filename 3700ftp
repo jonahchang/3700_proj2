@@ -242,12 +242,16 @@ def main():
         ftp_client.rmdir(args.param1)
     elif args.operation == 'cp':
         if args.param2:
-            ftp_client.cp(args.param1, args.param2)
+            dest_parts = urlparse(args.param2)
+            dest_path = dest_parts.path if dest_parts.path else '/'
+            ftp_client.cp(url_parts.path, dest_path)
         else:
             print("Please provide a destination for the file")
     elif args.operation == 'mv':
         if args.param2:
-            ftp_client.mv(args.param1, args.param2)
+            dest_parts = urlparse(args.param2)
+            dest_path = dest_parts.path if dest_parts.path else '/'
+            ftp_client.cp(url_parts.path, dest_path)
         else:
             print("Please provide a destination for the file")
 
