@@ -21,9 +21,19 @@ def parse_arguments():
 
 def parse_ftp_url(ftp_url):
     parsed_url = urlparse(ftp_url)
+    if not parsed_url.scheme.startswith('ftp'):
+        print("Missing URL or doesn't start with ftp://")
+        sys.exit(1)
+
     host = parsed_url.hostname
     port = parsed_url.port if parsed_url.port else 21
     path = parsed_url.path
+
+    if not host:
+        print(f"Could not extract host from URL")
+        sys.exit(1)
+
+    print(f"Parsed URL: Host={host}, Port={port}, Path={path}")
     return host, port, path
 
 
@@ -167,12 +177,18 @@ def perform_operation(args, control_socket):
 def main():
     args = parse_arguments()
 
+    # Ensure args.param1 is provided for all operations
+    if not args.param1:
+        print("Error: The first parameter is required.")
+        sys.exit(1)
+
     if args.operation in ['cp', 'mv']:
-        # Assuming the source is always the first parameter for cp and mv
-        host, port, _ = parse_ftp_url(args.param1)
-    else:
-        # For other operations, use param1 which should be the FTP URL
-        host, port, _ = parse_ftp_url(args.param1)
+        # Additional validation for 'cp' and 'mv' to ensure both params are provided
+        if not args.param2:
+            print("Error: both source and destination parameter required for cp and mv operations.")
+            sys.exit(1)
+    # Parse FTP URL from the first parameter
+    host, port, _ = parse_ftp_url(args.param1)
 
     control_socket = connect_and_login(host, port)
     perform_operation(args, control_socket)
