@@ -220,16 +220,17 @@ def parse_args():
                         help='Operation to execute')
     parser.add_argument('param1', help='First parameter (local or FTP path)')
     parser.add_argument('param2', nargs='?', default='', help='Second parameter (local or FTP path)')
-    parser.add_argument('--username', '-u', help='Username for FTP login')
-    parser.add_argument('--password', '-p', help='Password for FTP login')
     parser.add_argument('server_url', help='FTP server URL')
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    ftp_client = FTPClient(args.server_url, args.username,
-                           args.password)
+    url_parts = urlparse(args.server_url)
+    username = url_parts.username
+    password = url_parts.password
+    server_url = f"{url_parts.scheme}://{url_parts.hostname}/"
+    ftp_client = FTPClient(server_url, username, password)
     ftp_client.connect()
     ftp_client.login()
 
