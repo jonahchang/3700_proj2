@@ -34,15 +34,16 @@ class FTPClient:
     def connect(self):
         if not self.server_url.hostname:
             print("Invalid server URL")
-            return
+            return False
 
         self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            self.control_socket.connect((self.server_url.hostname, self.server_url.port or 21))
+            self.control_socket.connect((self.server_url.hostname, 21))
             self.receive_response()
+            return True
         except Exception as e:
             print("Error connecting to server")
-
+            return False
 
     def login(self):
         if not self.username:
@@ -56,7 +57,14 @@ class FTPClient:
             self.receive_response()
 
     def send_command(self, command):
-        self.control_socket.send((command + '\r\n').encode())
+        if self.control_socket is None:
+            print("Control socket is not initialized.")
+            return
+
+        try:
+            self.control_socket.send((command + '\r\n').encode())
+        except Exception as e:
+            print(f"Error sending command: {e}")
 
     def receive_response(self):
         data = self.control_socket.recv(4096).decode()
