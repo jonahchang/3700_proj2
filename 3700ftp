@@ -2,7 +2,6 @@
 import socket
 import argparse
 from urllib.parse import urlparse
-import os
 
 
 def parse_pasv_response(response):
@@ -242,9 +241,15 @@ def main():
     elif args.operation == 'rmdir':
         ftp_client.rmdir(args.param1)
     elif args.operation == 'cp':
-        ftp_client.cp(args.param1, args.param2)
+        if args.param2:
+            ftp_client.cp(args.param1, args.param2)
+        else:
+            print("Please provide a destination for the file")
     elif args.operation == 'mv':
-        ftp_client.mv(args.param1, args.param2)
+        if args.param2:
+            ftp_client.mv(args.param1, args.param2)
+        else:
+            print("Please provide a destination for the file")
 
 
 if __name__ == "__main__":
