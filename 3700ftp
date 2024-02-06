@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+import argparse
+import socket
+from urllib.parse import urlparse
+
+
+class FTPClient:
+    def __init__(self, server_url):
+        self.server_url = urlparse(server_url)
+        self.control_socket = None
+        self.data_socket = None
+        self.verbose = False
+
+    def parse_args(self):
+        parser = argparse.ArgumentParser(description='FTP client for basic operations')
+        parser.add_argument('operation', choices=['ls', 'mkdir', 'rm', 'rmdir', 'cp', 'mv'],
+                            help='Operation to execute')
+        parser.add_argument('param1', help='First parameter (local or FTP path)')
+        parser.add_argument('param2', nargs='?', default='', help='Second parameter (local or FTP path)')
+        parser.add_argument('--verbose', '-v', action='store_true',
+                            help='Print all messages to and from the FTP server')
+        return parser.parse_args()
+
+    def send_command(self, command):
+        if self.verbose:
+            print(f'Sending: {command.strip()}')
+        self.control_socket.sendall(command.encode('utf-8'))
+
+    def receive_response(self):
+        response = self.control_socket.recv(4096).decode('utf-8')
+        if self.verbose:
+            print(f'Received: {response.strip()}')
+        return response
+
+    def connect(self):
+        self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.control_socket.connect((self.server_url.hostname, self.server_url.port or 21))
+        self.receive_response()
+
+    def login(self):
+        user_cmd = f"USER {self.server_url.username or 'anonymous'}\r\n"
+        self.send_command(user_cmd)
+        self.receive_response()
+
+        # If a password is provided, send the PASS command
+        if self.server_url.password:
+            pass_cmd = f"PASS {self.server_url.password}\r\n"
+            self.send_command(pass_cmd)
+            self.receive_response()
+
+    def quit(self):
+        quit_cmd = "QUIT\r\n"
+        self.send_command(quit_cmd)
+        self.receive_response()
+
+    def list_directory(self, path):
+        pasv_cmd = "PASV\r\n"
+        self.send_command(pasv_cmd)
+        response = self.receive_response()
+
+        if response.startswith("227"):
+            data_address = self.extract_data_address(response)
+            self.open_data_socket(data_address)
+
+            list_cmd = f"LIST {path}\r\n"
+            self.send_command(list_cmd)
+            self.receive_response()
+
+            data = self.data_socket.recv(4096).decode('utf-8')
+            while data:
+                print(data, end='')
+                data = self.data_socket.recv(4096).decode('utf-8')
+
+            self.data_socket.close()
+            self.receive_response()
+
+    def make_directory(self, path):
+        mkdir_cmd = f"MKD {path}\r\n"
+        self.send_command(mkdir_cmd)
+        self.receive_response()
+
+    def remove_directory(self, path):
+        rmdir_cmd = f"RMD {path}\r\n"
+        self.send_command(rmdir_cmd)
+        self.receive_response()
+
+    def remove_file(self, path):
+        dele_cmd = f"DELE {path}\r\n"
+        self.send_command(dele_cmd)
+        self.receive_response()
+
+    def copy_file(self, source_path, destination_path):
+        pasv_cmd = "PASV\r\n"
+        self.send_command(pasv_cmd)
+        response = self.receive_response()
+
+        if response.startswith("227"):
+            data_address = self.extract_data_address(response)
+            self.open_data_socket(data_address)
+
+            stor_cmd = f"STOR {destination_path}\r\n"
+            self.send_command(stor_cmd)
+            self.receive_response()
+
+            with open(source_path, 'rb') as file:
+                data = file.read(4096)
+                while data:
+                    self.data_socket.sendall(data)
+                    data = file.read(4096)
+
+            self.data_socket.close()
+            self.receive_response()
+
+    def move_file(self, source_path, destination_path):
+        # Move is essentially a copy followed by a delete
+        self.copy_file(source_path, destination_path)
+        self.remove_file(source_path)
+
+    def extract_data_address(self, response):
+        start = response.find('(') + 1
+        end = response.find(')')
+        data_address = response[start:end].split(',')
+        host = '.'.join(data_address[:4])
+        port = (int(data_address[4]) << 8) + int(data_address[5])
+        return host, port
+
+    def open_data_socket(self, data_address):
+        self.data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.data_socket.connect(data_address)
+
+
+if __name__ == "__main__":
+    ftp_client = FTPClient("ftp://ftp.3700.network")
+    args = ftp_client.parse_args()
+    ftp_client.verbose = args.verbose
+
+    try:
+        ftp_client.connect()
+        ftp_client.login()
+
+        if args.operation == 'ls':
+            ftp_client.list_directory(args.param1)
+        elif args.operation == 'mkdir':
+            ftp_client.make_directory(args.param1)
+        elif args.operation == 'rmdir':
+            ftp_client.remove_directory(args.param1)
+        elif args.operation == 'rm':
+            ftp_client.remove_file(args.param1)
+        elif args.operation == 'cp':
+            ftp_client.copy_file(args.param1, args.param2)
+        elif args.operation == 'mv':
+            ftp_client.move_file(args.param1, args.param2)
+
+        ftp_client.quit()
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    finally:
+        if ftp_client.control_socket:
+            ftp_client.control_socket.close()
+        if ftp_client.data_socket:
+            ftp_client.data_socket.close()
