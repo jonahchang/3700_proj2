@@ -117,43 +117,25 @@ class FTPClient:
                     data_socket.sendall(chunk)
                 data_socket.close()
 
-    def copy_remote_to_local(self, source, destination):
-        # Parse the FTP URL of the source
-        source_url = urlparse(source)
+    def copy_local_to_remote(self, source, destination):
+        with open(source, 'rb') as file:
+            # Extract the path from the FTP URL (destination)
+            dest_path = urlparse(destination).path
+            self.send_command(f"STOR {dest_path}")
 
-        # Open the destination file in binary write mode
-        with open(destination, 'wb') as local_file:
-            # Connect to the FTP server
-            self.connect()
-
-            # Send USER and PASS commands to log in
-            self.send_command(f"USER {source_url.username}")
-            self.send_command(f"PASS {source_url.password}")
-
-            # Set the data transfer mode to binary
-            self.send_command("TYPE I")
-
-            # Set the connection to passive mode and get data connection details
             host, port = self.pasv()
+            if host and port:
+                data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                data_socket.connect((host, port))
 
-            # Send the RETR command to initiate the data transfer
-            self.send_command(f"RETR {source_url.path}")
+                while True:
+                    chunk = file.read(4096)
+                    if not chunk:
+                        break
+                    data_socket.sendall(chunk)
 
-            # Connect to the data socket and receive the file data
-            data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            data_socket.connect((host, port))
-            while True:
-                chunk = data_socket.recv(4096)
-                if not chunk:
-                    break
-                local_file.write(chunk)
-
-            # Close the data socket
-            data_socket.close()
-
-            # Receive the response after the data transfer
-            response = self.receive_response()
-            print(response)
+                data_socket.close()
+                self.receive_response()
 
     def mv(self, source, destination):
         # Parse the FTP URLs of the source and destination
