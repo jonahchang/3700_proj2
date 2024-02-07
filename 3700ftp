@@ -37,48 +37,42 @@ def parse_ftp_url(ftp_url):
     return host, port, path
 
 
-def set_transfer_settings(control_socket):
-    commands = [b'TYPE I\r\n', b'MODE S\r\n', b'STRU F\r\n']
-    for command in commands:
-        control_socket.sendall(command)
-        response = control_socket.recv(1024).decode('utf-8')
-        print(response)
-        if not response.startswith('200'):
-            raise Exception(
-                f"Failed to set transfer settings with command {command.decode('utf-8').strip()}: {response}")
-
-
 def connect_and_login(host, port=21):
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    control_socket.settimeout(10)
+    control_socket.settimeout(10)  # Set a reasonable timeout
     control_socket.connect((host, port))
-    print(control_socket.recv(1024).decode('utf-8'))  # Welcome message
-
-    # Login process
-    control_socket.sendall(f'USER {USERNAME}\r\n'.encode('utf-8'))
-    print(control_socket.recv(1024).decode('utf-8'))
-    control_socket.sendall(f'PASS {PASSWORD}\r\n'.encode('utf-8'))
-    response = control_socket.recv(1024).decode('utf-8')
-    print(response)
-
-    # Check if login was successful
-    if not response.startswith('230'):
-        print("Login failed.")
-        sys.exit(1)
-
+    recv_response(control_socket)  # Welcome message
+    send_command(control_socket, f'USER {USERNAME}\r\n')
+    send_command(control_socket, f'PASS {PASSWORD}\r\n', expected_start='230')
     return control_socket
 
 
+def set_transfer_settings(control_socket):
+    commands = [b'TYPE I\r\n', b'MODE S\r\n', b'STRU F\r\n']
+    for command in commands:
+        send_command(control_socket, command, expected_start='200')
+
+
+def send_command(control_socket, command, expected_start='2'):
+    control_socket.sendall(command)
+    response = recv_response(control_socket)
+    assert response.startswith(expected_start), f"Command failed: {command.strip()} - {response.strip()}"
+
+
+def recv_response(control_socket):
+    return control_socket.recv(1024).decode('utf-8')
+
+
 def enter_passive_mode(control_socket):
-    control_socket.sendall(b'PASV\r\n')
-    response = control_socket.recv(1024).decode('utf-8')
-    print(response)
+    send_command(control_socket, b'PASV\r\n', expected_start='227')
+    response = recv_response(control_socket)
+    ip_address, port = parse_pasv_response(response)
+    return ip_address, port
 
+
+def parse_pasv_response(response):
     match = re.search(r'\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)', response)
-    if not match:
-        raise Exception("Failed to enter passive mode: Response parsing failed.")
-
-    ip_address = '.'.join(match.group(i) for i in range(1, 5))
+    ip_address = '.'.join(match.groups()[:4])
     port = (int(match.group(5)) << 8) + int(match.group(6))
     return ip_address, port
 
@@ -86,6 +80,7 @@ def enter_passive_mode(control_socket):
 def establish_data_channel(control_socket):
     ip_address, port = enter_passive_mode(control_socket)
     data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    data_socket.settimeout(10)
     data_socket.connect((ip_address, port))
     return data_socket
 
@@ -121,6 +116,7 @@ def delete_directory(control_socket, path):
 
 
 def copy_file(control_socket, source, destination):
+    data_socket = None
     # Determine if we are uploading or downloading based on the source format
     if os.path.isfile(source):  # Uploading a local file to FTP
         try:
@@ -128,27 +124,42 @@ def copy_file(control_socket, source, destination):
             with open(source, 'rb') as file:
                 data_socket = establish_data_channel(control_socket)
                 control_socket.sendall(f'STOR {destination_path}\r\n'.encode('utf-8'))
-                print(control_socket.recv(1024).decode('utf-8'))  # Response to STOR command
+                response = control_socket.recv(1024).decode('utf-8')  # Response to STOR command
+                print(response)
+                if not response.startswith('150'):
+                    raise Exception("Failed to start upload")
                 data_socket.sendall(file.read())
         except socket.timeout:
-            print("File transfer timed out")
+            print("File transfer timed out when uploading to FTP server")
         finally:
-            if data_socket: data_socket.close()
+            if data_socket is not None:
+                data_socket.close()
             print(control_socket.recv(1024).decode('utf-8'))  # Final response
 
     else:  # Downloading a file from FTP to local
-        source_host, _, source_path = parse_ftp_url(source)
-        data_socket = establish_data_channel(control_socket)
-        control_socket.sendall(f'RETR {source_path}\r\n'.encode('utf-8'))
-        print(control_socket.recv(1024).decode('utf-8'))  # Response to RETR command
-        with open(destination, 'wb') as file:
-            while True:
-                data = data_socket.recv(1024)
-                if not data:
-                    break
-                file.write(data)
-        data_socket.close()
-        print(control_socket.recv(1024).decode('utf-8'))  # Final response
+        try:
+            source_host, _, source_path = parse_ftp_url(source)
+            data_socket = establish_data_channel(control_socket)
+            control_socket.sendall(f'RETR {source_path}\r\n'.encode('utf-8'))
+            response = control_socket.recv(1024).decode('utf-8')  # Response to RETR command
+            print(response)
+            if not response.startswith('150'):
+                raise Exception("Failed to start download")
+            with open(destination, 'wb') as file:
+                try:
+                    while True:
+                        data = data_socket.recv(1024)
+                        if not data:
+                            break
+                        file.write(data)
+                except socket.timeout:
+                    print("Timed out while receiving data file")
+        except socket.timeout:
+            print("File transfer timed out when downloading from FTP server")
+        finally:
+            if data_socket is not None:
+                data_socket.close()
+            print(control_socket.recv(1024).decode('utf-8'))  # Final response
 
 
 def move_file(control_socket, source, destination):
