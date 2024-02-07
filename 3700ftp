@@ -24,7 +24,6 @@ def parse_ftp_url(ftp_url):
     print(parsed_url.scheme, parsed_url.hostname, parsed_url.port, parsed_url.path)
     if not parsed_url.scheme.startswith('ftp'):
         print("Missing URL or doesn't start with ftp://")
-        sys.exit(1)
 
     host = parsed_url.hostname
     port = parsed_url.port if parsed_url.port else 21
@@ -125,7 +124,7 @@ def delete_directory(control_socket, path):
 def copy_file(control_socket, source, destination):
     data_socket = None
     # Determine if we are uploading or downloading based on the source format
-    if os.path.isfile(source):  # Uploading a local file to FTP
+    if urlparse(destination).scheme.startswith('ftp'):  # Uploading a local file to FTP
         try:
             destination_host, _, destination_path = parse_ftp_url(destination)
             with open(source, 'rb') as file:
