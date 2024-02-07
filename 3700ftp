@@ -20,24 +20,19 @@ def parse_arguments():
 
 
 def parse_ftp_url(ftp_url):
+    #assert ftp_url.startswith('ftp://'), "FTP URL must start with 'ftp://'."
     parsed_url = urlparse(ftp_url)
-    if not parsed_url.scheme.startswith('ftp'):
-        print("Missing URL or doesn't start with ftp://")
-        sys.exit(1)
-
-    host = 'ftp.3700.network'
-    port = parsed_url.port if parsed_url.port else 21
+    host = parsed_url.hostname
+    port = parsed_url.port or 21
     path = parsed_url.path
 
-    if not host:
-        print(f"Could not extract host from URL")
-        sys.exit(1)
+    #assert host, f"Could not extract host from URL: {ftp_url}"
 
     print(f"Parsed URL: Host={host}, Port={port}, Path={path}")
     return host, port, path
 
 
-def connect_and_login(host='ftp.3700.network', port=21):
+def connect_and_login(host, port=21):
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     control_socket.settimeout(10)  # Set a reasonable timeout
     control_socket.connect((host, port))
@@ -206,7 +201,6 @@ def main():
             sys.exit(1)
     # Parse FTP URL from the first parameter
     host, port, _ = parse_ftp_url(args.param1)
-    host = 'ftp.3700.network'
 
     control_socket = connect_and_login(host, port)
     set_transfer_settings(control_socket)
