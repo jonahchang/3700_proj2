@@ -20,54 +20,65 @@ def parse_arguments():
 
 
 def parse_ftp_url(ftp_url):
-    #assert ftp_url.startswith('ftp://'), "FTP URL must start with 'ftp://'."
     parsed_url = urlparse(ftp_url)
+    if not parsed_url.scheme.startswith('ftp'):
+        print("Missing URL or doesn't start with ftp://")
+        sys.exit(1)
+
     host = parsed_url.hostname
-    port = parsed_url.port or 21
+    port = parsed_url.port if parsed_url.port else 21
     path = parsed_url.path
 
-    #assert host, f"Could not extract host from URL: {ftp_url}"
+    if not host:
+        print(f"Could not extract host from URL")
+        sys.exit(1)
 
     print(f"Parsed URL: Host={host}, Port={port}, Path={path}")
     return host, port, path
 
 
-def connect_and_login(host, port=21):
-    control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    control_socket.settimeout(10)  # Set a reasonable timeout
-    control_socket.connect((host, port))
-    recv_response(control_socket)  # Welcome message
-    send_command(control_socket, f'USER {USERNAME}\r\n')
-    send_command(control_socket, f'PASS {PASSWORD}\r\n', expected_start='230')
-    return control_socket
-
-
 def set_transfer_settings(control_socket):
     commands = [b'TYPE I\r\n', b'MODE S\r\n', b'STRU F\r\n']
     for command in commands:
-        send_command(control_socket, command, expected_start='200')
+        control_socket.sendall(command)
+        response = control_socket.recv(1024).decode('utf-8')
+        print(response)
+        if not response.startswith('200'):
+            raise Exception(
+                f"Failed to set transfer settings with command {command.decode('utf-8').strip()}: {response}")
 
 
-def send_command(control_socket, command, expected_start='2'):
-    control_socket.sendall(command)
-    response = recv_response(control_socket)
-    assert response.startswith(expected_start), f"Command failed: {command.strip()} - {response.strip()}"
+def connect_and_login(host, port=21):
+    control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    control_socket.settimeout(10)
+    control_socket.connect((host, port))
+    print(control_socket.recv(1024).decode('utf-8'))  # Welcome message
 
+    # Login process
+    control_socket.sendall(f'USER {USERNAME}\r\n'.encode('utf-8'))
+    print(control_socket.recv(1024).decode('utf-8'))
+    control_socket.sendall(f'PASS {PASSWORD}\r\n'.encode('utf-8'))
+    response = control_socket.recv(1024).decode('utf-8')
+    print(response)
 
-def recv_response(control_socket):
-    return control_socket.recv(1024).decode('utf-8')
+    # Check if login was successful
+    if not response.startswith('230'):
+        print("Login failed.")
+        sys.exit(1)
+
+    return control_socket
 
 
 def enter_passive_mode(control_socket):
-    send_command(control_socket, b'PASV\r\n', expected_start='227')
-    response = recv_response(control_socket)
-    ip_address, port = parse_pasv_response(response)
-    return ip_address, port
+    control_socket.sendall(b'PASV\r\n')
+    response = control_socket.recv(1024).decode('utf-8')
+    print(response)
 
-
-def parse_pasv_response(response):
     match = re.search(r'\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)', response)
-    ip_address = '.'.join(match.groups()[:4])
+    if not match:
+        raise Exception("Failed to enter passive mode: Response parsing failed.")
+
+    ip_address = '.'.join(match.group(i) for i in range(1, 5))
     port = (int(match.group(5)) << 8) + int(match.group(6))
     return ip_address, port
 
