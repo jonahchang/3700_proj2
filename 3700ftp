@@ -210,8 +210,13 @@ def main():
         if not args.param2:
             print("Error: both source and destination parameter required for cp and mv operations.")
             sys.exit(1)
-    # Parse FTP URL from the first parameter
-    host, port, _ = parse_ftp_url(args.param1)
+        if urlparse(args.param1).scheme == 'ftp':
+            # Parse FTP URL from the first parameter
+            host, port, _ = parse_ftp_url(args.param1)
+        else:
+            host, port, _ = parse_ftp_url(args.param2)
+    else:
+        host, port, _ = parse_ftp_url(args.param1)
 
     control_socket = connect_and_login(host, port)
     set_transfer_settings(control_socket)
