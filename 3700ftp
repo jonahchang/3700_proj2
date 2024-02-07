@@ -29,9 +29,9 @@ def parse_ftp_url(ftp_url):
     port = parsed_url.port if parsed_url.port else 21
     path = parsed_url.path
 
-    if not host:
-        print(f"Could not extract host from URL")
-        sys.exit(1)
+    #if not host:
+        #print(f"Could not extract host from URL")
+        #sys.exit(1)
 
     print(f"Parsed URL: Host={host}, Port={port}, Path={path}")
     return host, port, path
