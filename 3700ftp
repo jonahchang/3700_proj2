@@ -21,6 +21,7 @@ def parse_arguments():
 
 def parse_ftp_url(ftp_url):
     parsed_url = urlparse(ftp_url)
+    print(parsed_url.scheme, parsed_url.hostname, parsed_url.port, parsed_url.path)
     if not parsed_url.scheme.startswith('ftp'):
         print("Missing URL or doesn't start with ftp://")
         sys.exit(1)
