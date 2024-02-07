@@ -21,20 +21,23 @@ def parse_arguments():
 
 def parse_ftp_url(ftp_url):
     parsed_url = urlparse(ftp_url)
-    print(parsed_url.scheme, parsed_url.hostname, parsed_url.username, parsed_url.password, parsed_url.path)
-    if not parsed_url.scheme.startswith('ftp'):
-        print("Missing URL or doesn't start with ftp://")
+    print(parsed_url.scheme, parsed_url.hostname, parsed_url.path)
 
+    username = parsed_url.username
+    password = parsed_url.password
     host = parsed_url.hostname
     port = parsed_url.port if parsed_url.port else 21
     path = parsed_url.path
+
+    username = username if username else 'anonymous'
+    password = password if password else ''
 
     if not host:
         print(f"Could not extract host from URL")
         sys.exit(1)
 
     print(f"Parsed URL: Host={host}, Port={port}, Path={path}")
-    return host, port, path
+    return host, port, path, username, password
 
 
 def set_transfer_settings(control_socket):
@@ -48,18 +51,19 @@ def set_transfer_settings(control_socket):
                 f"Failed to set transfer settings with command {command.decode('utf-8').strip()}: {response}")
 
 
-def connect_and_login(host, port=21):
+def connect_and_login(host, port=21, username='anonymous', password=''):
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     control_socket.settimeout(10)
     control_socket.connect((host, port))
     print(control_socket.recv(1024).decode('utf-8'))  # Welcome message
 
     # Login process
-    control_socket.sendall(f'USER {USERNAME}\r\n'.encode('utf-8'))
+    control_socket.sendall(f'USER {username}\r\n'.encode('utf-8'))
     print(control_socket.recv(1024).decode('utf-8'))
-    control_socket.sendall(f'PASS {PASSWORD}\r\n'.encode('utf-8'))
-    response = control_socket.recv(1024).decode('utf-8')
-    print(response)
+    if not password == '':
+        control_socket.sendall(f'PASS {password}\r\n'.encode('utf-8'))
+        response = control_socket.recv(1024).decode('utf-8')
+        print(response)
 
     # Check if login was successful
     if not response.startswith('230'):
@@ -126,7 +130,7 @@ def copy_file(control_socket, source, destination):
     # Determine if we are uploading or downloading based on the source format
     if urlparse(destination).scheme.startswith('ftp'):  # Uploading a local file to FTP
         try:
-            destination_host, _, destination_path = parse_ftp_url(destination)
+            destination_host, _, destination_path, _, _ = parse_ftp_url(destination)
             with open(source, 'rb') as file:
                 data_socket = establish_data_channel(control_socket)
                 control_socket.sendall(f'STOR {destination_path}\r\n'.encode('utf-8'))
@@ -144,7 +148,7 @@ def copy_file(control_socket, source, destination):
 
     else:  # Downloading a file from FTP to local
         try:
-            source_host, _, source_path = parse_ftp_url(source)
+            source_host, _, source_path, _, _ = parse_ftp_url(source)
             data_socket = establish_data_channel(control_socket)
             control_socket.sendall(f'RETR {source_path}\r\n'.encode('utf-8'))
             response = control_socket.recv(1024).decode('utf-8')  # Response to RETR command
@@ -172,7 +176,7 @@ def move_file(control_socket, source, destination):
     copy_file(control_socket, source, destination)
     # Determine if the source is an FTP URL to delete the remote file
     if source.startswith('ftp://'):
-        source_host, _, source_path = parse_ftp_url(source)
+        source_host, _, source_path, _, _ = parse_ftp_url(source)
         control_socket.sendall(f'DELE {source_path}\r\n'.encode('utf-8'))
         print(control_socket.recv(1024).decode('utf-8'))  # Response to DELE command
     else:  # Delete the local source file
@@ -182,7 +186,7 @@ def move_file(control_socket, source, destination):
 def perform_operation(args, control_socket):
     if args.operation in ['ls', 'mkdir', 'rm', 'rmdir']:
         # Operations that deal with paths directly
-        _, _, path = parse_ftp_url(args.param1)
+        _, _, path, _, _ = parse_ftp_url(args.param1)
         if args.operation == 'ls':
             list_directory(control_socket, path)
         elif args.operation == 'mkdir':
@@ -213,13 +217,13 @@ def main():
             sys.exit(1)
         if urlparse(args.param1).scheme == 'ftp':
             # Parse FTP URL from the first parameter
-            host, port, _ = parse_ftp_url(args.param1)
+            host, port, _, username, password = parse_ftp_url(args.param1)
         else:
-            host, port, _ = parse_ftp_url(args.param2)
+            host, port, _, username, password = parse_ftp_url(args.param2)
     else:
-        host, port, _ = parse_ftp_url(args.param1)
+        host, port, _, username, password = parse_ftp_url(args.param1)
 
-    control_socket = connect_and_login(host, port)
+    control_socket = connect_and_login(host, port, username, password)
     set_transfer_settings(control_socket)
     perform_operation(args, control_socket)
 
