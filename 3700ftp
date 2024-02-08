@@ -6,10 +6,6 @@ import os
 import sys
 from urllib.parse import urlparse
 
-# Fixed credentials for FTP login
-USERNAME = 'jonahc'
-PASSWORD = '1b10da1e033405616a318b5edcb4ca077919f67f35fd99f48fcf34e2aa5e96d2'
-
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='3700ftp: A simple FTP client.')
